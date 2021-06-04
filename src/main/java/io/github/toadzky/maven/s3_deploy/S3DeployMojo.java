@@ -28,6 +28,7 @@ import com.amazonaws.services.s3.AmazonS3ClientBuilder;
 import com.amazonaws.services.s3.model.ObjectMetadata;
 import com.amazonaws.services.s3.model.PutObjectRequest;
 import java.util.List;
+import java.util.Optional;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugins.annotations.LifecyclePhase;
@@ -48,8 +49,12 @@ public class S3DeployMojo extends AbstractMojo {
 
     @Parameter
     private Aws aws;
-    @Parameter
+    @Parameter(required = true)
     private List<UploadableArtifact> artifacts;
+    @Parameter(property = "s3deploy.aws.profile")
+    private String awsProfile;
+    @Parameter(property = "s3deploy.aws.region")
+    private String awsRegion;
 
     public void execute() throws MojoExecutionException {
         try {
@@ -87,9 +92,24 @@ public class S3DeployMojo extends AbstractMojo {
         }
     }
 
+    private Optional<String> getProfile() {
+        if (awsProfile != null && !awsProfile.isEmpty()) {
+            return Optional.of(awsProfile);
+        }
+        return Optional.ofNullable(aws).map(Aws::getProfile).filter(r -> !r.isBlank());
+    }
+
+    private Optional<String> getRegion() {
+        if (awsRegion != null && !awsRegion.isEmpty()) {
+            return Optional.of(awsRegion);
+        }
+        return Optional.ofNullable(aws).map(Aws::getRegion).filter(r -> !r.isBlank());
+    }
+
     private AmazonS3 createClient() {
-        final AmazonS3ClientBuilder builder = AmazonS3ClientBuilder.standard().withRegion(aws.getRegion());
-        if (aws.getProfile() != null) {
+        final AmazonS3ClientBuilder builder = AmazonS3ClientBuilder.standard();
+        getRegion().ifPresent(builder::setRegion);
+        getProfile().ifPresent(profile -> {
             if (!AwsProfileFileLocationProvider.DEFAULT_CONFIG_LOCATION_PROVIDER.getLocation().exists()) {
                 getLog().warn(
                         "AWS config file not found in default locations. May have problems using profile: " + aws.getProfile()
@@ -100,11 +120,11 @@ public class S3DeployMojo extends AbstractMojo {
                             new EnvironmentVariableCredentialsProvider(),
                             new SystemPropertiesCredentialsProvider(),
                             WebIdentityTokenCredentialsProvider.create(),
-                            new ProfileCredentialsProvider(aws.getProfile()),
+                            new ProfileCredentialsProvider(profile),
                             new EC2ContainerCredentialsProviderWrapper()
                     )
             );
-        }
+        });
         return builder.build();
     }
 }
